@@ -10,7 +10,7 @@ class PresetGame {
 
 class AppConfig {
   // Hardcoded Connection URL of the server (cannot be customized by normal users)
-  static const String defaultBackendUrl = 'http://193.70.34.101:20028';
+  static const String defaultBackendUrl = 'https://api.axioshacks.com';
   
   // Game relative installation paths
   static const String defaultSubpath = 'files/res/arm64-v8a';

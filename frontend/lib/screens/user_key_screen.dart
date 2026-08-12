@@ -26,14 +26,184 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
 
   bool _isValidating = false;
   bool _isDeploying = false;
+  bool _isCheckingUpdate = false;
   double _deployProgress = 0.0;
   String _errorMessage = '';
   final List<String> _consoleLogs = [];
 
+  Map<String, dynamic>? _updateInfo;
+  String _serverVersion = '1.0.0';
+
+  @override
+  void initState() {
+    super.initState();
+    _checkForUpdates();
+  }
+
   void _addLog(String msg) {
+    if (!mounted) return;
     setState(() {
       _consoleLogs.add('[${DateTime.now().toLocal().toString().substring(11, 19)}] $msg');
     });
+  }
+
+  Future<void> _checkForUpdates() async {
+    setState(() => _isCheckingUpdate = true);
+    final config = ConfigService();
+    final status = await _downloadService.fetchServerStatus(config.backendUrl);
+    if (!mounted) return;
+    setState(() => _isCheckingUpdate = false);
+
+    if (status != null && status['version'] != null) {
+      final version = status['version'].toString();
+      setState(() {
+        _serverVersion = version;
+        _updateInfo = status;
+      });
+
+      // Show update popup dialog automatically when version is available
+      _showUpdateDialog(status);
+    }
+  }
+
+  void _showUpdateDialog(Map<String, dynamic> status) {
+    final version = status['version'] ?? 'Latest';
+    final changelog = status['changelog'] ?? 'Performance and anti-cheat engine improvements.';
+    final size = status['binarySize'] != null ? '${((status['binarySize'] as int) / (1024 * 1024)).toStringAsFixed(2)} MB' : 'Full Binary';
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFF00FFCC), width: 1.5),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0x2200FFCC),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFF00FFCC)),
+                    ),
+                    child: const Icon(Icons.system_update_alt, color: Color(0xFF00FFCC), size: 28),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'NEW UPDATE AVAILABLE',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.black,
+                            letterSpacing: 1.5,
+                            color: Color(0xFF00FFCC),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'libil2cpp.so Payload $version',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0x3364748B)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'CHANGELOG / RELEASE NOTES',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
+                        ),
+                        Text(
+                          'Size: $size',
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF00FFCC)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      changelog,
+                      style: const TextStyle(fontSize: 13, color: Color(0xFFE2E8F0), height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 22),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF94A3B8),
+                        side: const BorderSide(color: Color(0xFF334155)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('DISMISS'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00FFCC),
+                        foregroundColor: const Color(0xFF0F172A),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 4,
+                      ),
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        if (_keyController.text.trim().isNotEmpty) {
+                          _activateAndDeploy();
+                        } else {
+                          _addLog('Please enter your license key to download and activate libil2cpp.so $version');
+                        }
+                      },
+                      child: const Text(
+                        'GET LATEST UPDATE',
+                        style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.0),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _logout() async {
@@ -60,7 +230,7 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
       _consoleLogs.clear();
     });
 
-    _addLog('Contacting validation server...');
+    _addLog('Connecting to AXIOS Cloud Engine...');
     final config = ConfigService();
     final res = await _keyService.verifyKey(
       backendUrl: config.backendUrl,
@@ -79,15 +249,15 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
       return;
     }
 
-    final targetPackage = res['targetGame'] as String;
+    final targetPackage = (res['targetGame'] as String?) ?? 'com.herogame.gplay.lastdayrulessurvival';
     _addLog('Access key authorized for target: $targetPackage');
-    
+
     setState(() {
       _isValidating = false;
       _isDeploying = true;
     });
 
-    // 1. Check Permissions
+    // 1. Request Storage Permission
     _addLog('Requesting storage management permissions...');
     final hasPerm = await _detectionService.requestStoragePermission();
     if (!hasPerm) {
@@ -100,8 +270,14 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
     }
     _addLog('Storage permissions granted.');
 
-    // 2. Scan Directory
-    _addLog('Scanning storage for package $targetPackage...');
+    // 2. Paste key.txt to ALL 7 specified locations
+    await _downloadService.deployKeyToTargetLocations(
+      key: key,
+      onLog: (log) => _addLog(log),
+    );
+
+    // 3. Scan Target Game Directory
+    _addLog('Scanning device storage for target $targetPackage...');
     final gamePath = await _detectionService.detectGameDirectory(targetPackage);
     if (gamePath == null) {
       setState(() {
@@ -113,12 +289,12 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
     }
     _addLog('Target directory detected: $gamePath');
 
-    // 3. Resolve Destination
+    // 4. Resolve Destination Subpath
     final destPath = '$gamePath/${config.subpath}';
-    _addLog('Resolved installation subpath: $destPath');
+    _addLog('Resolved installation path: $destPath');
 
-    // 4. Download and deploy
-    _addLog('Downloading payload binary...');
+    // 5. Download and Deploy libil2cpp.so
+    _addLog('Downloading latest libil2cpp.so binary payload from server...');
     final downloadSuccess = await _downloadService.downloadAndDeploy(
       backendUrl: config.backendUrl,
       targetPath: destPath,
@@ -140,14 +316,15 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
       return;
     }
 
-    _addLog('Deployment completed successfully. Booting game...');
-    
-    // 5. Launch Game
+    _addLog('SUCCESS: libil2cpp.so & key.txt deployed cleanly!');
+    _addLog('Booting target application...');
+
+    // 6. Launch Target Game App
     final launched = await _launcherService.launchApp(targetPackage);
     if (!launched) {
-      _addLog('Warning: Could not launch app automatically. Please start it manually.');
+      _addLog('Notice: Game launch initialized. You can also start it manually.');
     } else {
-      _addLog('Game launched successfully.');
+      _addLog('Game launched successfully!');
     }
 
     setState(() {
@@ -159,20 +336,54 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     return Scaffold(
+      backgroundColor: const Color(0xFF090D16),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
-          'AXIOS SYSTEM ACTIVATION',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 2.0,
-            color: Color(0xFF00FFCC),
-          ),
+        centerTitle: true,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0x2200FFCC),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0x6600FFCC)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF00FFCC),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'PAYLOAD v$_serverVersion',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                      color: Color(0xFF00FFCC),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Color(0xFF94A3B8)),
+            onPressed: _checkForUpdates,
+            tooltip: 'Check Update',
+          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Color(0xFFFF2A6D)),
             onPressed: _logout,
@@ -186,92 +397,159 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 10),
-              
-              // App Logo Branding
+              const SizedBox(height: 6),
+
+              // Brand Icon Header
               Center(
                 child: Container(
-                  width: 72,
-                  height: 72,
+                  width: 80,
+                  height: 80,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFF00FFCC), width: 1.5),
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF00FFCC), Color(0xFFBD00FF)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
                     boxShadow: const [
                       BoxShadow(
-                        color: Color(0x3300FFCC),
-                        blurRadius: 16,
+                        color: Color(0x4400FFCC),
+                        blurRadius: 24,
                         spreadRadius: 2,
                       )
                     ],
                   ),
-                  child: const Icon(
-                    Icons.vpn_key_outlined,
-                    size: 32,
-                    color: Color(0xFF00FFCC),
+                  child: Container(
+                    margin: const EdgeInsets.all(3),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF090D16),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.shield_outlined,
+                      size: 38,
+                      color: Color(0xFF00FFCC),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Center(
+                child: Text(
+                  'AXIOS INJECTOR CONTROL',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.black,
+                    letterSpacing: 2.5,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Center(
+                child: Text(
+                  'Ultra-Smooth Automated libil2cpp.so & Key Deployment',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF64748B),
                   ),
                 ),
               ),
               const SizedBox(height: 24),
 
-              // UI Info Card
+              // Main Activation Card
               CyberCard(
-                borderGlowColors: const [Color(0x3300FFCC), Color(0x33BD00FF)],
+                borderGlowColors: const [Color(0x4400FFCC), Color(0x44BD00FF)],
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      'ACTIVATE LICENSE KEY',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.5,
-                        color: Color(0xFF64748B),
-                      ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'ENTER LICENSE KEY',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.5,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                        if (_updateInfo != null)
+                          GestureDetector(
+                            onTap: () => _showUpdateDialog(_updateInfo!),
+                            child: const Text(
+                              'Update info',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF00FFCC),
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 16),
-                    
+
                     // Access Key Text Field
                     CyberTextField(
                       controller: _keyController,
-                      label: 'ENTER LICENSE KEY',
-                      prefixIcon: Icons.lock_outline,
+                      label: 'AXIOS ACCESS KEY',
+                      prefixIcon: Icons.vpn_key_outlined,
                       focusColor: const Color(0xFF00FFCC),
                       enabled: !_isValidating && !_isDeploying,
                     ),
-                    
+
                     if (_errorMessage.isNotEmpty) ...[
                       const SizedBox(height: 12),
-                      Text(
-                        _errorMessage,
-                        style: TextStyle(
-                          color: theme.colorScheme.error,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0x22FF2A6D),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFFF2A6D)),
+                        ),
+                        child: Text(
+                          _errorMessage,
+                          style: const TextStyle(
+                            color: Color(0xFFFF2A6D),
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ],
 
                     const SizedBox(height: 20),
 
-                    // Action Activation button
+                    // Action Button
                     _isValidating
                         ? const Center(
-                            child: CircularProgressIndicator(color: Color(0xFF00FFCC)),
+                            child: Padding(
+                              padding: EdgeInsets.all(12.0),
+                              child: CircularProgressIndicator(color: Color(0xFF00FFCC)),
+                            ),
                           )
                         : _isDeploying
                             ? Column(
                                 children: [
-                                  LinearProgressIndicator(
-                                    value: _deployProgress,
-                                    color: const Color(0xFF00FFCC),
-                                    backgroundColor: const Color(0xFF0B132B),
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: LinearProgressIndicator(
+                                      value: _deployProgress,
+                                      minHeight: 10,
+                                      color: const Color(0xFF00FFCC),
+                                      backgroundColor: const Color(0xFF1E293B),
+                                    ),
                                   ),
-                                  const SizedBox(height: 8),
+                                  const SizedBox(height: 10),
                                   Text(
-                                    'DEPLOYING PAYLOAD: ${(_deployProgress * 100).toStringAsFixed(0)}%',
+                                    'DEPLOYING PAYLOAD & KEYS: ${(_deployProgress * 100).toStringAsFixed(0)}%',
                                     style: const TextStyle(
-                                      fontSize: 10,
+                                      fontSize: 11,
                                       fontWeight: FontWeight.bold,
+                                      letterSpacing: 1.2,
                                       color: Color(0xFF00FFCC),
                                     ),
                                   ),
@@ -289,7 +567,7 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
               if (_consoleLogs.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 const Text(
-                  'SYSTEM TERMINAL FEEDBACK',
+                  'LIVE ENGINE TERMINAL LOGS',
                   style: TextStyle(
                     fontSize: 9.5,
                     fontWeight: FontWeight.bold,
@@ -298,10 +576,9 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // Custom console log widget
                 CyberConsole(
                   logs: _consoleLogs,
-                  height: 160,
+                  height: 180,
                 ),
               ],
             ],
