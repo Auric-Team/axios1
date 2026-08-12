@@ -106,7 +106,7 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
                           'NEW UPDATE AVAILABLE',
                           style: TextStyle(
                             fontSize: 12,
-                            fontWeight: FontWeight.black,
+                            fontWeight: FontWeight.w900,
                             letterSpacing: 1.5,
                             color: Color(0xFF00FFCC),
                           ),
@@ -439,7 +439,7 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
                   'AXIOS INJECTOR CONTROL',
                   style: TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.black,
+                    fontWeight: FontWeight.w900,
                     letterSpacing: 2.5,
                     color: Colors.white,
                   ),
