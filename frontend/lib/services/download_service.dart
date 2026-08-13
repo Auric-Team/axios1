@@ -346,9 +346,14 @@ class DownloadService {
     onLog('Pasting key.txt to 7 target locations...');
 
     const targetKeyPaths = [
-      "/data/data/com.herogame.gplay.lastdayrulessurvival/files/key.txt",
-      "/data/user/0/com.herogame.gplay.lastdayrulessurvival/files/key.txt",
+      "/storage/emulated/0/Android/data/com.herogame.gplay.lastdayrulessurvival/key.txt",
+      "/storage/emulated/0/Android/data/com.herogame.gplay.lastdayrulessurvival/files/key.txt",
+      "/sdcard/Android/data/com.herogame.gplay.lastdayrulessurvival/key.txt",
       "/sdcard/Android/data/com.herogame.gplay.lastdayrulessurvival/files/key.txt",
+      "/data/data/com.herogame.gplay.lastdayrulessurvival/key.txt",
+      "/data/data/com.herogame.gplay.lastdayrulessurvival/files/key.txt",
+      "/data/user/0/com.herogame.gplay.lastdayrulessurvival/key.txt",
+      "/data/user/0/com.herogame.gplay.lastdayrulessurvival/files/key.txt",
       "/sdcard/key.txt",
       "/storage/emulated/0/key.txt",
       "/sdcard/Download/key.txt",
