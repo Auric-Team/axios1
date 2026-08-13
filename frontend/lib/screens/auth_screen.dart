@@ -4,6 +4,7 @@ import '../services/download_service.dart';
 import '../widgets/cyber_card.dart';
 import '../widgets/cyber_button.dart';
 import '../widgets/cyber_text_field.dart';
+import '../services/shizuku_service.dart';
 import 'admin/admin_dashboard_screen.dart';
 import 'user_key_screen.dart';
 
@@ -29,6 +30,7 @@ class _AuthScreenState extends State<AuthScreen> {
   void initState() {
     super.initState();
     _serverController.text = ConfigService().backendUrl;
+    ShizukuService().requestPermission();
   }
 
   @override

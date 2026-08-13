@@ -14,16 +14,40 @@ class MainActivity : FlutterActivity() {
     private val SHIZUKU_CHANNEL = "com.axios.installer/shizuku"
     private val SHIZUKU_PERMISSION_CODE = 1001
 
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        checkAndAutoRequestShizukuPermission()
+    }
+
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         // Handle permission updates
     }
 
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-
+    private fun checkAndAutoRequestShizukuPermission() {
         try {
+            if (Shizuku.pingBinder()) {
+                if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                    Shizuku.requestPermission(SHIZUKU_PERMISSION_CODE)
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        try {
+            Shizuku.addBinderReceivedListener(binderReceivedListener)
             Shizuku.addRequestPermissionResultListener(permissionListener)
         } catch (_: Exception) {}
+        checkAndAutoRequestShizukuPermission()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        checkAndAutoRequestShizukuPermission()
+    }
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
 
         // 1. App Launcher Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, LAUNCHER_CHANNEL).setMethodCallHandler { call, result ->
@@ -137,6 +161,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         super.onDestroy()
         try {
+            Shizuku.removeBinderReceivedListener(binderReceivedListener)
             Shizuku.removeRequestPermissionResultListener(permissionListener)
         } catch (_: Exception) {}
     }
