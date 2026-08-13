@@ -50,6 +50,15 @@ class DownloadService {
         await tempFile.delete();
       }
 
+      // Fetch server binary size in advance as fallback for chunked encoding
+      int knownTotalSize = 0;
+      try {
+        final status = await fetchServerStatus(backendUrl);
+        if (status != null && status['binarySize'] != null && status['binarySize'] is int) {
+          knownTotalSize = status['binarySize'] as int;
+        }
+      } catch (_) {}
+
       onLog('Created temporary download file at: $tempFilePath');
       onLog('Connecting to backend ($cleanUrl)...');
 
@@ -62,18 +71,19 @@ class DownloadService {
           validateStatus: (status) => status != null && status < 500,
         ),
         onReceiveProgress: (received, total) {
+          final effectiveTotal = (total > 0) ? total : knownTotalSize;
           final now = DateTime.now().millisecondsSinceEpoch;
           final elapsedSec = (now - startTime) / 1000.0;
           final speedBps = elapsedSec > 0 ? (received / elapsedSec) : 0.0;
-          final remainingBytes = (total > 0 && total >= received) ? (total - received) : 0;
+          final remainingBytes = (effectiveTotal > 0 && effectiveTotal >= received) ? (effectiveTotal - received) : 0;
           final etaSeconds = speedBps > 0 ? (remainingBytes / speedBps).ceil() : 0;
-          final double progress = (total > 0) ? (received / total) : 0.0;
+          final double progress = (effectiveTotal > 0) ? (received / effectiveTotal).clamp(0.0, 1.0) : 0.0;
 
           if (onProgressDetail != null) {
             onProgressDetail(
               progress: progress,
               receivedBytes: received,
-              totalBytes: total,
+              totalBytes: effectiveTotal,
               speedBps: speedBps,
               etaSeconds: etaSeconds,
             );
