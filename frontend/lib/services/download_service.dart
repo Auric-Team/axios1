@@ -4,12 +4,18 @@ import 'package:path_provider/path_provider.dart';
 import 'config_service.dart';
 
 class DownloadService {
-  final Dio _dio = Dio();
+  final Dio _dio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 120),
+      sendTimeout: const Duration(seconds: 15),
+    ),
+  );
 
   String _sanitizeUrl(String backendUrl) {
     String cleanUrl = backendUrl.trim();
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      cleanUrl = 'http://$cleanUrl';
+      cleanUrl = 'https://$cleanUrl';
     }
     if (cleanUrl.endsWith('/')) {
       cleanUrl = cleanUrl.substring(0, cleanUrl.length - 1);
@@ -38,13 +44,13 @@ class DownloadService {
       }
 
       onLog('Created temporary download file at: $tempFilePath');
-      onLog('Connecting to backend...');
+      onLog('Connecting to backend ($cleanUrl)...');
 
       final Response response = await _dio.download(
         downloadEndpoint,
         tempFilePath,
         onReceiveProgress: (received, total) {
-          if (total != -1) {
+          if (total > 0) {
             final double progress = received / total;
             onProgress(progress);
           } else {
@@ -103,13 +109,16 @@ class DownloadService {
       onLog('Success: Payload deployed to $finalFilePath');
       return true;
     } catch (e) {
-      onLog('Exception during download/deploy: $e');
-
       if (e is DioException) {
-        onLog('Network Error details: ${e.message}');
-        if (e.response != null) {
-          onLog('Server response: ${e.response?.data}');
+        if (e.response?.statusCode == 404) {
+          onLog('Error 404: libil2cpp.so has not been published on the backend web panel yet.');
+        } else if (e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.receiveTimeout) {
+          onLog('Error: Connection timed out while connecting to $backendUrl.');
+        } else {
+          onLog('Network Error: ${e.message ?? e.toString()}');
         }
+      } else {
+        onLog('Deployment Exception: $e');
       }
       return false;
     }
