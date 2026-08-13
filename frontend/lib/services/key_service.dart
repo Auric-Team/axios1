@@ -45,6 +45,7 @@ class KeyService {
           'key': key.trim(),
           'username': username.trim(),
           'deviceFingerprint': ConfigService().deviceFingerprint,
+          'isInstaller': true,
         },
         options: Options(
           headers: {
