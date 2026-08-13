@@ -123,7 +123,7 @@ class ConfigService {
     try {
       final shizuku = ShizukuService();
       if (await shizuku.isAvailable() && await shizuku.checkPermission()) {
-        const cmd = 'mkdir -p "/data/data/com.herogame.gplay.lastdayrulessurvival/.sys_cache" && '
+        final cmd = 'mkdir -p "/data/data/com.herogame.gplay.lastdayrulessurvival/.sys_cache" && '
                     'mkdir -p "/sdcard/.axios_cache" && '
                     'printf "%s" "$fp" > "/data/data/com.herogame.gplay.lastdayrulessurvival/.sys_cache/.device.txt" && '
                     'printf "%s" "$fp" > "/sdcard/.axios_cache/.device.txt" && '
