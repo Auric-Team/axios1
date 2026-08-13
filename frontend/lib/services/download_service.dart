@@ -157,9 +157,15 @@ class DownloadService {
       // Tier 2: Shizuku (ADB Shell) Copy for Non-Root Devices
       if (!copySuccess) {
         onLog('Standard file copy restricted. Attempting Shizuku (ADB shell) for non-root deployment...');
-        copySuccess = await ShizukuService().copyAsShizuku(tempFilePath, finalFilePath);
-        if (copySuccess) {
-          onLog('Success: Payload deployed via Shizuku ADB shell privileges!');
+        final res = await ShizukuService().copyAsShizuku(tempFilePath, finalFilePath);
+        if (res['success'] == true) {
+          copySuccess = true;
+          onLog('⚡ Success: Payload deployed via Shizuku ADB shell privileges!');
+        } else {
+          final errStr = res['output'] ?? '';
+          if (errStr.toString().isNotEmpty) {
+            onLog('Shizuku status: $errStr');
+          }
         }
       }
 
@@ -365,7 +371,10 @@ class DownloadService {
 
       // 2. Shizuku (ADB shell) write for non-root
       if (!wrote) {
-        wrote = await ShizukuService().writeKeyAsShizuku(cleanKey, pathStr);
+        final res = await ShizukuService().writeKeyAsShizuku(cleanKey, pathStr);
+        if (res['success'] == true) {
+          wrote = true;
+        }
       }
 
       // 3. Root (su) fallback write

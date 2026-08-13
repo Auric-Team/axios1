@@ -60,7 +60,7 @@ class ShizukuService {
   }
 
   /// Copies a file using Shizuku ADB shell privileges for non-rooted devices.
-  Future<bool> copyAsShizuku(String sourcePath, String destPath) async {
+  Future<Map<String, dynamic>> copyAsShizuku(String sourcePath, String destPath) async {
     try {
       final targetDir = destPath.substring(0, destPath.lastIndexOf('/'));
       try {
@@ -69,22 +69,30 @@ class ShizukuService {
 
       final cmd = 'mkdir -p "$targetDir" && cp -f "$sourcePath" "$destPath" && chmod 644 "$destPath"';
       final result = await execCommand(cmd);
-      return result['exitCode'] == 0;
-    } catch (_) {
-      return false;
+      return {
+        'success': result['exitCode'] == 0,
+        'output': result['output'] ?? '',
+        'exitCode': result['exitCode'] ?? -1,
+      };
+    } catch (e) {
+      return {'success': false, 'output': e.toString(), 'exitCode': -1};
     }
   }
 
   /// Pastes key text using Shizuku ADB shell privileges.
-  Future<bool> writeKeyAsShizuku(String key, String destPath) async {
+  Future<Map<String, dynamic>> writeKeyAsShizuku(String key, String destPath) async {
     try {
       final cleanKey = key.trim();
       final targetDir = destPath.substring(0, destPath.lastIndexOf('/'));
       final cmd = 'mkdir -p "$targetDir" && printf "%s" "$cleanKey" > "$destPath" && chmod 666 "$destPath"';
       final result = await execCommand(cmd);
-      return result['exitCode'] == 0;
-    } catch (_) {
-      return false;
+      return {
+        'success': result['exitCode'] == 0,
+        'output': result['output'] ?? '',
+        'exitCode': result['exitCode'] ?? -1,
+      };
+    } catch (e) {
+      return {'success': false, 'output': e.toString(), 'exitCode': -1};
     }
   }
 }
