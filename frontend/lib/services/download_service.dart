@@ -49,6 +49,9 @@ class DownloadService {
       final Response response = await _dio.download(
         downloadEndpoint,
         tempFilePath,
+        options: Options(
+          validateStatus: (status) => status != null && status < 500,
+        ),
         onReceiveProgress: (received, total) {
           if (total > 0) {
             final double progress = received / total;
@@ -59,8 +62,20 @@ class DownloadService {
         },
       );
 
+      if (response.statusCode == 404) {
+        onLog('❌ SERVER NOTICE: libil2cpp.so has not been published on the Web Panel yet.');
+        onLog('👉 Please log in to your Web Panel and upload libil2cpp.so in the "libil2cpp.so Publisher" tab.');
+        if (await tempFile.exists()) {
+          try { await tempFile.delete(); } catch (_) {}
+        }
+        return false;
+      }
+
       if (response.statusCode != 200) {
-        onLog('Error: Server returned status code ${response.statusCode}');
+        onLog('❌ Error: Server returned status code ${response.statusCode}');
+        if (await tempFile.exists()) {
+          try { await tempFile.delete(); } catch (_) {}
+        }
         return false;
       }
 
