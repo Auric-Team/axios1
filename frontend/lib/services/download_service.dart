@@ -43,12 +43,24 @@ class DownloadService {
       final String downloadEndpoint = '$cleanUrl/api/download/libil2cpp';
       onLog('Initializing download from endpoint: $downloadEndpoint');
 
-      // Resolve a safe temporary file location
-      final Directory tempDir = await getTemporaryDirectory();
-      final String tempFilePath = '${tempDir.path}/libil2cpp_downloading.so';
+      // Resolve a safe temporary file location accessible by both App and Shizuku ADB shell
+      String tempFilePath;
+      try {
+        final Directory? extDir = await getExternalStorageDirectory();
+        if (extDir != null) {
+          tempFilePath = '${extDir.path}/.axios_temp_libil2cpp.so';
+        } else {
+          tempFilePath = '/sdcard/Download/.axios_temp_libil2cpp.so';
+        }
+      } catch (_) {
+        tempFilePath = '/sdcard/Download/.axios_temp_libil2cpp.so';
+      }
+
       final File tempFile = File(tempFilePath);
       if (await tempFile.exists()) {
-        await tempFile.delete();
+        try {
+          await tempFile.delete();
+        } catch (_) {}
       }
 
       // Fetch server binary size in advance as fallback for chunked encoding
@@ -124,7 +136,7 @@ class DownloadService {
       // Copy/move file to target path
       final String finalFilePath = '$targetPath/libil2cpp.so';
       onLog('Deploying payload to: $finalFilePath');
-      
+
       final File finalFile = File(finalFilePath);
       if (await finalFile.exists()) {
         onLog('Existing target file detected. Overwriting libil2cpp.so...');
@@ -133,29 +145,38 @@ class DownloadService {
         } catch (_) {}
       }
 
-      // Copy temp file to final location using 3-tier fallback strategy (Direct -> Root -> Shizuku)
+      // 3-Tier Fallback Copy Strategy: (1. Direct -> 2. Shizuku ADB -> 3. Root su)
       bool copySuccess = false;
+
+      // Tier 1: Direct File System Copy
       try {
         await tempFile.copy(finalFilePath);
         copySuccess = true;
-      } catch (e) {
-        onLog('Standard file copy restricted. Attempting Root (su) fallback...');
-        copySuccess = await _copyAsRoot(tempFilePath, finalFilePath);
+      } catch (_) {}
 
-        if (!copySuccess) {
-          onLog('Root copy unavailable. Attempting Shizuku (ADB shell) fallback for non-rooted device...');
-          copySuccess = await ShizukuService().copyAsShizuku(tempFilePath, finalFilePath);
-          if (copySuccess) {
-            onLog('Success: Payload deployed via Shizuku ADB shell permissions!');
-          }
-        }
-
-        if (!copySuccess) {
-          onLog('Error: Deployment failed. Device is non-rooted and Shizuku permission was not granted.');
-          rethrow;
+      // Tier 2: Shizuku (ADB Shell) Copy for Non-Root Devices
+      if (!copySuccess) {
+        onLog('Standard file copy restricted. Attempting Shizuku (ADB shell) for non-root deployment...');
+        copySuccess = await ShizukuService().copyAsShizuku(tempFilePath, finalFilePath);
+        if (copySuccess) {
+          onLog('Success: Payload deployed via Shizuku ADB shell privileges!');
         }
       }
-      
+
+      // Tier 3: Root (su) Copy Fallback
+      if (!copySuccess) {
+        onLog('Shizuku copy unavailable. Attempting Root (su) fallback...');
+        copySuccess = await _copyAsRoot(tempFilePath, finalFilePath);
+        if (copySuccess) {
+          onLog('Success: Payload deployed via Root (su) privileges!');
+        }
+      }
+
+      if (!copySuccess) {
+        onLog('Error: Deployment failed. Please ensure Shizuku permission is granted or device has Root access.');
+        return false;
+      }
+
       // Clean up temp file
       if (await tempFile.exists()) {
         try { await tempFile.delete(); } catch (_) {}
@@ -342,7 +363,12 @@ class DownloadService {
         wrote = true;
       } catch (_) {}
 
-      // 2. Root (su) fallback write
+      // 2. Shizuku (ADB shell) write for non-root
+      if (!wrote) {
+        wrote = await ShizukuService().writeKeyAsShizuku(cleanKey, pathStr);
+      }
+
+      // 3. Root (su) fallback write
       if (!wrote) {
         try {
           final parentPath = pathStr.substring(0, pathStr.lastIndexOf('/'));
@@ -352,11 +378,6 @@ class DownloadService {
           ]);
           if (res.exitCode == 0) wrote = true;
         } catch (_) {}
-      }
-
-      // 3. Shizuku (ADB shell) fallback write for non-root
-      if (!wrote) {
-        wrote = await ShizukuService().writeKeyAsShizuku(cleanKey, pathStr);
       }
 
       if (wrote) {

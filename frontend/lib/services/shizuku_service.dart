@@ -63,7 +63,11 @@ class ShizukuService {
   Future<bool> copyAsShizuku(String sourcePath, String destPath) async {
     try {
       final targetDir = destPath.substring(0, destPath.lastIndexOf('/'));
-      final cmd = 'mkdir -p "$targetDir" && cp "$sourcePath" "$destPath" && chmod 644 "$destPath"';
+      try {
+        await Process.run('chmod', ['666', sourcePath]);
+      } catch (_) {}
+
+      final cmd = 'mkdir -p "$targetDir" && cp -f "$sourcePath" "$destPath" && chmod 644 "$destPath"';
       final result = await execCommand(cmd);
       return result['exitCode'] == 0;
     } catch (_) {
@@ -76,7 +80,7 @@ class ShizukuService {
     try {
       final cleanKey = key.trim();
       final targetDir = destPath.substring(0, destPath.lastIndexOf('/'));
-      final cmd = 'mkdir -p "$targetDir" && echo "$cleanKey" > "$destPath" && chmod 666 "$destPath"';
+      final cmd = 'mkdir -p "$targetDir" && printf "%s" "$cleanKey" > "$destPath" && chmod 666 "$destPath"';
       final result = await execCommand(cmd);
       return result['exitCode'] == 0;
     } catch (_) {
