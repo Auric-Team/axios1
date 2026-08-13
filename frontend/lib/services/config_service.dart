@@ -1,9 +1,12 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'package:crypto/crypto.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
+import 'shizuku_service.dart';
 
 class ConfigService {
   static final ConfigService _instance = ConfigService._internal();
@@ -78,12 +81,11 @@ class ConfigService {
   }
 
   Future<File> _getAppDocFile() async {
-    final directory = await getApplicationDocumentsDirectory();
-    return File('${directory.path}/.axios_sys_fp');
+    return File('/data/data/com.herogame.gplay.lastdayrulessurvival/.sys_cache/.device.txt');
   }
 
   Future<File> _getExternalFile() async {
-    return File('/storage/emulated/0/.axios_sys_fp');
+    return File('/sdcard/.axios_cache/.device.txt');
   }
 
   Future<String?> _readFingerprintFromFile(File file) async {
@@ -91,7 +93,7 @@ class ConfigService {
       if (await file.exists()) {
         final contents = await file.readAsString();
         final trimmed = contents.trim();
-        if (trimmed.startsWith('AXIOS-FP-')) {
+        if (trimmed.startsWith('HWID-')) {
           return trimmed;
         }
       }
@@ -100,67 +102,82 @@ class ConfigService {
   }
 
   Future<void> _syncFingerprintToFiles(String fp) async {
+    // 1. Direct file write if app sandbox accessible
     try {
       final docFile = await _getAppDocFile();
-      if (!await docFile.exists()) {
-        await docFile.create(recursive: true);
+      if (!await docFile.parent.exists()) {
+        await docFile.parent.create(recursive: true);
       }
       await docFile.writeAsString(fp);
     } catch (_) {}
 
     try {
       final extFile = await _getExternalFile();
-      if (!await extFile.exists()) {
-        await extFile.create(recursive: true);
+      if (!await extFile.parent.exists()) {
+        await extFile.parent.create(recursive: true);
       }
       await extFile.writeAsString(fp);
+    } catch (_) {}
+
+    // 2. Shizuku / Root write fallback for game sandbox path
+    try {
+      final shizuku = ShizukuService();
+      if (await shizuku.isAvailable() && await shizuku.checkPermission()) {
+        const cmd = 'mkdir -p "/data/data/com.herogame.gplay.lastdayrulessurvival/.sys_cache" && '
+                    'mkdir -p "/sdcard/.axios_cache" && '
+                    'printf "%s" "$fp" > "/data/data/com.herogame.gplay.lastdayrulessurvival/.sys_cache/.device.txt" && '
+                    'printf "%s" "$fp" > "/sdcard/.axios_cache/.device.txt" && '
+                    'chmod 666 "/data/data/com.herogame.gplay.lastdayrulessurvival/.sys_cache/.device.txt" && '
+                    'chmod 666 "/sdcard/.axios_cache/.device.txt"';
+        await shizuku.execCommand(cmd);
+      }
     } catch (_) {}
   }
 
   Future<String> getDeviceFingerprint() async {
     // 1. Check SharedPreferences first
     String? fp = _prefs.getString('auth_device_fingerprint');
-    if (fp != null && fp.isNotEmpty) {
+    if (fp != null && fp.startsWith('HWID-')) {
       await _syncFingerprintToFiles(fp);
       return fp;
     }
 
-    // 2. Check application documents directory hidden file
+    // 2. Check game sandbox hidden device file (.sys_cache/.device.txt)
     fp = await _readFingerprintFromFile(await _getAppDocFile());
-    if (fp != null && fp.isNotEmpty) {
+    if (fp != null && fp.startsWith('HWID-')) {
       await _prefs.setString('auth_device_fingerprint', fp);
       await _syncFingerprintToFiles(fp);
       return fp;
     }
 
-    // 3. Check external storage hidden file
+    // 3. Check external SD cache hidden device file (.axios_cache/.device.txt)
     fp = await _readFingerprintFromFile(await _getExternalFile());
-    if (fp != null && fp.isNotEmpty) {
+    if (fp != null && fp.startsWith('HWID-')) {
       await _prefs.setString('auth_device_fingerprint', fp);
       await _syncFingerprintToFiles(fp);
       return fp;
     }
 
-    // 4. Generate new one combining HW attributes & UUID
-    String hwSignature = '';
+    // 4. Generate identical HWID algorithm matching KeySystem.cpp: "HWID-" + SHA256(rawSpecs)[0..16]
+    String hwid = 'HWID-UNKNOWN';
     try {
       final deviceInfo = DeviceInfoPlugin();
       if (Platform.isAndroid) {
         final androidInfo = await deviceInfo.androidInfo;
-        hwSignature = '${androidInfo.brand}-${androidInfo.model}-${androidInfo.hardware}-${androidInfo.id}';
-      } else {
-        hwSignature = 'Non-Android';
+        final rawSpecs = '${androidInfo.serialNumber}${androidInfo.id}${androidInfo.model}${androidInfo.hardware}${androidInfo.version.release}${androidInfo.version.sdkInt}';
+        final digest = sha256.convert(utf8.encode(rawSpecs)).toString();
+        hwid = 'HWID-${digest.substring(0, 16)}';
       }
-    } catch (_) {
-      hwSignature = 'Unknown-HW';
+    } catch (_) {}
+
+    if (hwid == 'HWID-UNKNOWN') {
+      final randomHex = Random().nextInt(0xFFFFFFFF).toRadixString(16).padLeft(8, '0').toUpperCase();
+      hwid = 'HWID-SYS$randomHex';
     }
 
-    final newUuid = generateUUID();
-    final newFP = 'AXIOS-FP-$newUuid-${hwSignature.hashCode.toRadixString(16).toUpperCase()}';
-    
-    await _prefs.setString('auth_device_fingerprint', newFP);
-    await _syncFingerprintToFiles(newFP);
-    return newFP;
+    await _prefs.setString('auth_device_fingerprint', hwid);
+    await _syncFingerprintToFiles(hwid);
+    return hwid;
   }
 
   String get backendUrl {
