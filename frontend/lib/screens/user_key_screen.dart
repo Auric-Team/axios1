@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
 import '../services/download_service.dart';
 import '../services/key_service.dart';
 import '../services/detection_service.dart';
 import '../services/launcher_service.dart';
+import '../services/shizuku_service.dart';
 import '../widgets/cyber_card.dart';
 import '../widgets/cyber_button.dart';
 import '../widgets/cyber_text_field.dart';
@@ -23,6 +25,7 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
   final DownloadService _downloadService = DownloadService();
   final DetectionService _detectionService = DetectionService();
   final LauncherService _launcherService = LauncherService();
+  final ShizukuService _shizukuService = ShizukuService();
 
   bool _isValidating = false;
   bool _isDeploying = false;
@@ -34,6 +37,10 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
   int _etaSeconds = 0;
   String _errorMessage = '';
   final List<String> _consoleLogs = [];
+
+  bool _isShizukuRunning = false;
+  bool _hasShizukuPermission = false;
+  Timer? _shizukuPollTimer;
 
   Map<String, dynamic>? _updateInfo;
   String _serverVersion = '1.0.0';
@@ -62,6 +69,49 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
   void initState() {
     super.initState();
     _checkForUpdates();
+    _initShizukuMonitoring();
+  }
+
+  @override
+  void dispose() {
+    _shizukuPollTimer?.cancel();
+    _keyController.dispose();
+    super.dispose();
+  }
+
+  void _initShizukuMonitoring() {
+    _checkShizukuStatus();
+    // Keep asking / polling Shizuku permission automatically every 3 seconds until granted
+    _shizukuPollTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (!mounted) return;
+      _checkShizukuStatus();
+    });
+  }
+
+  Future<void> _checkShizukuStatus() async {
+    final available = await _shizukuService.isAvailable();
+    if (!available) {
+      if (mounted && _isShizukuRunning) {
+        setState(() {
+          _isShizukuRunning = false;
+          _hasShizukuPermission = false;
+        });
+      }
+      return;
+    }
+
+    final hasPerm = await _shizukuService.checkPermission();
+    if (mounted) {
+      setState(() {
+        _isShizukuRunning = true;
+        _hasShizukuPermission = hasPerm;
+      });
+    }
+
+    // Automatically prompt for Shizuku permission if available but not granted
+    if (!hasPerm) {
+      await _shizukuService.requestPermission();
+    }
   }
 
   void _addLog(String msg) {
@@ -85,7 +135,6 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
         _updateInfo = status;
       });
 
-      // Show update popup dialog automatically when version is available
       _showUpdateDialog(status);
     }
   }
@@ -126,23 +175,19 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'NEW UPDATE AVAILABLE',
-                          style: TextStyle(
-                            fontSize: 12,
+                        Text(
+                          'VERSION $version AVAILABLE',
+                          style: const TextStyle(
+                            fontSize: 13,
                             fontWeight: FontWeight.w900,
-                            letterSpacing: 1.5,
                             color: Color(0xFF00FFCC),
+                            letterSpacing: 1.2,
                           ),
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'libil2cpp.so Payload $version',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
+                          'Payload Size: $size',
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
                         ),
                       ],
                     ),
@@ -153,27 +198,23 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E293B),
+                  color: const Color(0xFF03060D),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0x3364748B)),
+                  border: Border.all(color: const Color(0xFF1E293B)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'CHANGELOG / RELEASE NOTES',
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
-                        ),
-                        Text(
-                          'Size: $size',
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF00FFCC)),
-                        ),
-                      ],
+                    const Text(
+                      'RELEASE CHANGELOG NOTES:',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF64748B),
+                        letterSpacing: 1.0,
+                      ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     Text(
                       changelog,
                       style: const TextStyle(fontSize: 13, color: Color(0xFFE2E8F0), height: 1.4),
@@ -285,22 +326,28 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
     _addLog('Requesting storage management permissions...');
     final hasPerm = await _detectionService.requestStoragePermission();
     if (!hasPerm) {
-      setState(() {
-        _isDeploying = false;
-        _errorMessage = 'Storage permission denied. Deployment aborted.';
-      });
-      _addLog('Error: Permission request rejected.');
-      return;
+      _addLog('Warning: Standard storage permission restricted.');
+    } else {
+      _addLog('Storage permissions active.');
     }
-    _addLog('Storage permissions granted.');
 
-    // 2. Paste key.txt to ALL 7 specified locations
+    // 2. Check Shizuku status for non-root fallback
+    if (_isShizukuRunning) {
+      if (_hasShizukuPermission) {
+        _addLog('⚡ Shizuku ADB Environment Active (Non-Root Privileges Engaged)');
+      } else {
+        _addLog('⚡ Shizuku Detected. Requesting Shizuku ADB permission...');
+        await _shizukuService.requestPermission();
+      }
+    }
+
+    // 3. Paste key.txt to ALL 7 specified locations (using Direct -> Root -> Shizuku)
     await _downloadService.deployKeyToTargetLocations(
       key: key,
       onLog: (log) => _addLog(log),
     );
 
-    // 3. Scan Target Game Directory
+    // 4. Scan Target Game Directory
     _addLog('Scanning device storage for target $targetPackage...');
     final gamePath = await _detectionService.detectGameDirectory(targetPackage);
     if (gamePath == null) {
@@ -311,13 +358,13 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
       _addLog('Error: Game folders not found. Please install the game first.');
       return;
     }
-    _addLog('Target directory detected: $gamePath');
+    _addLog('Target directory resolved: $gamePath');
 
-    // 4. Resolve Destination Subpath
+    // 5. Resolve Destination Subpath
     final destPath = '$gamePath/${config.subpath}';
     _addLog('Resolved installation path: $destPath');
 
-    // 5. Download and Deploy libil2cpp.so
+    // 6. Download and Deploy libil2cpp.so
     _addLog('Downloading latest libil2cpp.so binary payload from server...');
     final downloadSuccess = await _downloadService.downloadAndDeploy(
       backendUrl: config.backendUrl,
@@ -356,36 +403,39 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
       return;
     }
 
-    _addLog('SUCCESS: libil2cpp.so & key.txt deployed cleanly!');
-    _addLog('Booting target application...');
+    _addLog('Deployment completed successfully! Launching target game...');
+    await Future.delayed(const Duration(milliseconds: 1200));
 
-    // 6. Launch Target Game App
-    final launched = await _launcherService.launchApp(targetPackage);
-    if (!launched) {
-      _addLog('Notice: Game launch initialized. You can also start it manually.');
-    } else {
-      _addLog('Game launched successfully!');
+    final launchSuccess = await _launcherService.launchApp(targetPackage);
+    if (!launchSuccess) {
+      _addLog('Warning: Could not auto-launch $targetPackage. Please launch the game manually.');
     }
 
     setState(() {
       _isDeploying = false;
-      _keyController.clear();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        centerTitle: true,
         title: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
+            const Icon(Icons.security, color: Color(0xFF00FFCC), size: 20),
+            const SizedBox(width: 8),
+            const Text(
+              'AXIOS TERMINAL',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.5,
+                color: Colors.white,
+              ),
+            ),
+            const Spacer(),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
@@ -448,97 +498,97 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
                     shape: BoxShape.circle,
                     gradient: const LinearGradient(
                       colors: [Color(0xFF00FFCC), Color(0xFFBD00FF)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
                     ),
-                    boxShadow: const [
+                    boxShadow: [
                       BoxShadow(
-                        color: Color(0x4400FFCC),
-                        blurRadius: 24,
+                        color: const Color(0xFF00FFCC).withAlpha((255 * 0.4).round()),
+                        blurRadius: 25,
                         spreadRadius: 2,
-                      )
+                      ),
                     ],
                   ),
-                  child: Container(
-                    margin: const EdgeInsets.all(3),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF090D16),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.shield_outlined,
-                      size: 38,
-                      color: Color(0xFF00FFCC),
-                    ),
-                  ),
+                  child: const Icon(Icons.memory, color: Colors.black, size: 42),
                 ),
               ),
               const SizedBox(height: 16),
-              const Center(
-                child: Text(
-                  'AXIOS INJECTOR CONTROL',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 2.5,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Center(
-                child: Text(
-                  'Ultra-Smooth Automated libil2cpp.so & Key Deployment',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF64748B),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
 
-              // Main Activation Card
-              CyberCard(
-                borderGlowColors: const [Color(0x4400FFCC), Color(0x44BD00FF)],
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              // Shizuku Environment Status Badge
+              if (_isShizukuRunning) ...[
+                GestureDetector(
+                  onTap: () {
+                    if (!_hasShizukuPermission) {
+                      _shizukuService.requestPermission();
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _hasShizukuPermission ? const Color(0x2200FFCC) : const Color(0x22FFB800),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _hasShizukuPermission ? const Color(0xFF00FFCC) : const Color(0xFFFFB800),
+                      ),
+                    ),
+                    child: Row(
                       children: [
-                        const Text(
-                          'ENTER LICENSE KEY',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.5,
-                            color: Color(0xFF64748B),
+                        Icon(
+                          _hasShizukuPermission ? Icons.bolt : Icons.warning_amber_rounded,
+                          color: _hasShizukuPermission ? const Color(0xFF00FFCC) : const Color(0xFFFFB800),
+                          size: 18,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _hasShizukuPermission
+                                ? '⚡ SHIZUKU ADB ENVIRONMENT: ACTIVE (NON-ROOT DEPLOYMENT)'
+                                : '⚡ SHIZUKU DETECTED: TAP TO GRANT ADB PERMISSION',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.8,
+                              color: _hasShizukuPermission ? const Color(0xFF00FFCC) : const Color(0xFFFFB800),
+                            ),
                           ),
                         ),
-                        if (_updateInfo != null)
-                          GestureDetector(
-                            onTap: () => _showUpdateDialog(_updateInfo!),
-                            child: const Text(
-                              'Update info',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF00FFCC),
-                                decoration: TextDecoration.underline,
-                              ),
+                        if (!_hasShizukuPermission)
+                          const Text(
+                            'GRANT',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              decoration: TextDecoration.underline,
                             ),
                           ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
 
-                    // Access Key Text Field
+              // Key Input Card
+              CyberCard(
+                borderGlowColors: const [Color(0x3300FFCC), Color(0x33BD00FF)],
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'LICENSE KEY DEPLOYMENT',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.5,
+                        color: Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
                     CyberTextField(
                       controller: _keyController,
-                      label: 'AXIOS ACCESS KEY',
+                      label: 'ENTER ENGINE LICENSE KEY',
                       prefixIcon: Icons.vpn_key_outlined,
-                      focusColor: const Color(0xFF00FFCC),
-                      enabled: !_isValidating && !_isDeploying,
+                      obscureText: false,
                     ),
 
                     if (_errorMessage.isNotEmpty) ...[
@@ -592,7 +642,6 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.stretch,
                                   children: [
-                                    // Progress Header: Percentage & Transferred Bytes
                                     Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
@@ -632,7 +681,6 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
                                     ),
                                     const SizedBox(height: 12),
 
-                                    // Glowing Progress Bar
                                     ClipRRect(
                                       borderRadius: BorderRadius.circular(8),
                                       child: LinearProgressIndicator(
@@ -644,7 +692,6 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
                                     ),
                                     const SizedBox(height: 14),
 
-                                    // Telemetry Cards: Transfer Speed & ETA Timer
                                     Row(
                                       children: [
                                         Expanded(
@@ -743,17 +790,14 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
                 const Text(
                   'LIVE ENGINE TERMINAL LOGS',
                   style: TextStyle(
-                    fontSize: 9.5,
+                    fontSize: 11,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1.5,
                     color: Color(0xFF64748B),
                   ),
                 ),
-                const SizedBox(height: 8),
-                CyberConsole(
-                  logs: _consoleLogs,
-                  height: 180,
-                ),
+                const SizedBox(height: 10),
+                CyberConsole(logs: _consoleLogs),
               ],
             ],
           ),

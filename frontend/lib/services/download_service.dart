@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'config_service.dart';
+import 'shizuku_service.dart';
 
 class DownloadService {
   final Dio _dio = Dio(
@@ -115,7 +116,9 @@ class DownloadService {
       final Directory destDir = Directory(targetPath);
       if (!await destDir.exists()) {
         onLog('Target directory does not exist. Creating directories recursively...');
-        await destDir.create(recursive: true);
+        try {
+          await destDir.create(recursive: true);
+        } catch (_) {}
       }
 
       // Copy/move file to target path
@@ -127,28 +130,35 @@ class DownloadService {
         onLog('Existing target file detected. Overwriting libil2cpp.so...');
         try {
           await finalFile.delete();
-        } catch (_) {
-          // If we can't delete it normally, we will try to overwrite/delete it via root copy
-        }
+        } catch (_) {}
       }
 
-      // Copy temp file to final location
+      // Copy temp file to final location using 3-tier fallback strategy (Direct -> Root -> Shizuku)
       bool copySuccess = false;
       try {
         await tempFile.copy(finalFilePath);
         copySuccess = true;
       } catch (e) {
-        onLog('Standard file copy failed due to Android permission restrictions. Attempting root fallback...');
+        onLog('Standard file copy restricted. Attempting Root (su) fallback...');
         copySuccess = await _copyAsRoot(tempFilePath, finalFilePath);
+
         if (!copySuccess) {
-          onLog('Root copy fallback failed or root access is not available.');
+          onLog('Root copy unavailable. Attempting Shizuku (ADB shell) fallback for non-rooted device...');
+          copySuccess = await ShizukuService().copyAsShizuku(tempFilePath, finalFilePath);
+          if (copySuccess) {
+            onLog('Success: Payload deployed via Shizuku ADB shell permissions!');
+          }
+        }
+
+        if (!copySuccess) {
+          onLog('Error: Deployment failed. Device is non-rooted and Shizuku permission was not granted.');
           rethrow;
         }
       }
       
       // Clean up temp file
       if (await tempFile.exists()) {
-        await tempFile.delete();
+        try { await tempFile.delete(); } catch (_) {}
       }
 
       onLog('Success: Payload deployed to $finalFilePath');
@@ -181,7 +191,7 @@ class DownloadService {
         return response.data as Map<String, dynamic>;
       }
     } catch (e) {
-      // Ignored print logs to clean up analyzer
+      // Ignored print logs
     }
     return null;
   }
@@ -285,17 +295,14 @@ class DownloadService {
   /// Copies a file using root command permissions (`su`).
   Future<bool> _copyAsRoot(String sourcePath, String destPath) async {
     try {
-      // 1. Create target directory recursively via root
       final targetDirectory = destPath.substring(0, destPath.lastIndexOf('/'));
       final mkdirResult = await Process.run('su', ['-c', 'mkdir -p "$targetDirectory"']);
       if (mkdirResult.exitCode != 0) {
         return false;
       }
 
-      // 2. Perform the copy operation via root cp
       final cpResult = await Process.run('su', ['-c', 'cp "$sourcePath" "$destPath"']);
       if (cpResult.exitCode == 0) {
-        // 3. Set standard readable permissions
         await Process.run('su', ['-c', 'chmod 644 "$destPath"']);
         return true;
       }
@@ -323,6 +330,8 @@ class DownloadService {
 
     for (final pathStr in targetKeyPaths) {
       bool wrote = false;
+
+      // 1. Standard file write
       try {
         final file = File(pathStr);
         final parentDir = file.parent;
@@ -333,21 +342,27 @@ class DownloadService {
         wrote = true;
       } catch (_) {}
 
+      // 2. Root (su) fallback write
       if (!wrote) {
         try {
           final parentPath = pathStr.substring(0, pathStr.lastIndexOf('/'));
-          await Process.run('su', [
+          final res = await Process.run('su', [
             '-c',
             'mkdir -p "$parentPath" && echo "$cleanKey" > "$pathStr" && chmod 666 "$pathStr"'
           ]);
-          wrote = true;
+          if (res.exitCode == 0) wrote = true;
         } catch (_) {}
+      }
+
+      // 3. Shizuku (ADB shell) fallback write for non-root
+      if (!wrote) {
+        wrote = await ShizukuService().writeKeyAsShizuku(cleanKey, pathStr);
       }
 
       if (wrote) {
         onLog('Key pasted -> $pathStr');
       } else {
-        onLog('Written to root path: $pathStr');
+        onLog('Key write pending: $pathStr');
       }
     }
   }
