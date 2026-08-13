@@ -192,6 +192,10 @@ class ConfigService {
     return _prefs.getString('auth_username') ?? '';
   }
 
+  String get password {
+    return _prefs.getString('auth_password') ?? '';
+  }
+
   List<PresetGame> get presets => AppConfig.presets;
 
   Future<bool> setBackendUrl(String url) async {
@@ -214,7 +218,12 @@ class ConfigService {
     return await _prefs.setString('auth_username', username);
   }
 
+  Future<bool> setPassword(String password) async {
+    return await _prefs.setString('auth_password', password);
+  }
+
   Future<bool> clearToken() async {
+    await _prefs.remove('auth_password');
     await _prefs.remove('auth_username');
     return await _prefs.remove('auth_token');
   }

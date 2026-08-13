@@ -29,10 +29,12 @@ class CyberTextField extends StatefulWidget {
 class _CyberTextFieldState extends State<CyberTextField> {
   final FocusNode _focusNode = FocusNode();
   bool _isFocused = false;
+  late bool _isObscured;
 
   @override
   void initState() {
     super.initState();
+    _isObscured = widget.obscureText;
     _focusNode.addListener(() {
       setState(() {
         _isFocused = _focusNode.hasFocus;
@@ -70,7 +72,7 @@ class _CyberTextFieldState extends State<CyberTextField> {
       ),
       child: TextField(
         controller: widget.controller,
-        obscureText: widget.obscureText,
+        obscureText: _isObscured,
         focusNode: _focusNode,
         onChanged: widget.onChanged,
         enabled: isWidgetEnabled,
@@ -96,6 +98,20 @@ class _CyberTextFieldState extends State<CyberTextField> {
                   widget.prefixIcon,
                   color: _isFocused && isWidgetEnabled ? widget.focusColor : const Color(0xFF475569),
                   size: 20,
+                )
+              : null,
+          suffixIcon: widget.obscureText
+              ? IconButton(
+                  icon: Icon(
+                    _isObscured ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    color: _isFocused && isWidgetEnabled ? widget.focusColor : const Color(0xFF64748B),
+                    size: 20,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _isObscured = !_isObscured;
+                    });
+                  },
                 )
               : null,
         ),

@@ -29,7 +29,10 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   void initState() {
     super.initState();
-    _serverController.text = ConfigService().backendUrl;
+    final config = ConfigService();
+    _serverController.text = config.backendUrl;
+    _usernameController.text = config.username;
+    _passwordController.text = config.password;
     ShizukuService().requestPermission();
   }
 
@@ -75,6 +78,7 @@ class _AuthScreenState extends State<AuthScreen> {
       if (res['success'] == true && res['token'] != null) {
         await ConfigService().setToken(res['token'] as String);
         await ConfigService().setUsername(user);
+        await ConfigService().setPassword(pass);
         final role = res['role'] as String;
 
         if (!mounted) return;
@@ -105,6 +109,8 @@ class _AuthScreenState extends State<AuthScreen> {
       });
 
       if (res['success'] == true) {
+        await ConfigService().setUsername(user);
+        await ConfigService().setPassword(pass);
         setState(() {
           _isLoginMode = true;
           _errorMessage = '';
