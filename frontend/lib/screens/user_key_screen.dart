@@ -28,11 +28,35 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
   bool _isDeploying = false;
   bool _isCheckingUpdate = false;
   double _deployProgress = 0.0;
+  int _receivedBytes = 0;
+  int _totalBytes = 0;
+  double _downloadSpeedBps = 0.0;
+  int _etaSeconds = 0;
   String _errorMessage = '';
   final List<String> _consoleLogs = [];
 
   Map<String, dynamic>? _updateInfo;
   String _serverVersion = '1.0.0';
+
+  String _formatSpeed(double bps) {
+    if (bps >= 1024 * 1024) {
+      return '${(bps / (1024 * 1024)).toStringAsFixed(2)} MB/s';
+    }
+    if (bps >= 1024) {
+      return '${(bps / 1024).toStringAsFixed(1)} KB/s';
+    }
+    return '${bps.round()} B/s';
+  }
+
+  String _formatEta(int seconds) {
+    if (seconds <= 0) return 'Calculating...';
+    final mins = seconds ~/ 60;
+    final secs = seconds % 60;
+    if (mins > 0) {
+      return '${mins}m ${secs}s';
+    }
+    return '${secs}s';
+  }
 
   @override
   void initState() {
@@ -303,6 +327,22 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
           _deployProgress = prog;
         });
       },
+      onProgressDetail: ({
+        required double progress,
+        required int receivedBytes,
+        required int totalBytes,
+        required double speedBps,
+        required int etaSeconds,
+      }) {
+        if (!mounted) return;
+        setState(() {
+          _deployProgress = progress;
+          _receivedBytes = receivedBytes;
+          _totalBytes = totalBytes;
+          _downloadSpeedBps = speedBps;
+          _etaSeconds = etaSeconds;
+        });
+      },
       onLog: (log) => _addLog(log),
     );
 
@@ -532,28 +572,162 @@ class _UserKeyScreenState extends State<UserKeyScreen> {
                             ),
                           )
                         : _isDeploying
-                            ? Column(
-                                children: [
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(6),
-                                    child: LinearProgressIndicator(
-                                      value: _deployProgress,
-                                      minHeight: 10,
-                                      color: const Color(0xFF00FFCC),
-                                      backgroundColor: const Color(0xFF1E293B),
-                                    ),
+                            ? Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF03060D),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: const Color(0xFF00FFCC).withAlpha((255 * 0.4).round()),
+                                    width: 1.5,
                                   ),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    'DEPLOYING PAYLOAD & KEYS: ${(_deployProgress * 100).toStringAsFixed(0)}%',
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 1.2,
-                                      color: Color(0xFF00FFCC),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF00FFCC).withAlpha((255 * 0.15).round()),
+                                      blurRadius: 16,
+                                      spreadRadius: 2,
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    // Progress Header: Percentage & Transferred Bytes
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            const SizedBox(
+                                              width: 14,
+                                              height: 14,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Color(0xFF00FFCC),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              'DOWNLOADING: ${(_deployProgress * 100).toStringAsFixed(1)}%',
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w900,
+                                                letterSpacing: 1.2,
+                                                color: Color(0xFF00FFCC),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        Text(
+                                          _totalBytes > 0
+                                              ? '${(_receivedBytes / (1024 * 1024)).toStringAsFixed(2)} MB / ${(_totalBytes / (1024 * 1024)).toStringAsFixed(2)} MB'
+                                              : 'Syncing...',
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFF94A3B8),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+
+                                    // Glowing Progress Bar
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: LinearProgressIndicator(
+                                        value: _deployProgress.clamp(0.0, 1.0),
+                                        minHeight: 10,
+                                        color: const Color(0xFF00FFCC),
+                                        backgroundColor: const Color(0xFF1E293B),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 14),
+
+                                    // Telemetry Cards: Transfer Speed & ETA Timer
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF090D16),
+                                              borderRadius: BorderRadius.circular(10),
+                                              border: Border.all(color: const Color(0xFF1E293B)),
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                const Icon(Icons.bolt, color: Color(0xFFFFB800), size: 16),
+                                                const SizedBox(width: 6),
+                                                Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    const Text(
+                                                      'SPEED',
+                                                      style: TextStyle(
+                                                        color: Color(0xFF64748B),
+                                                        fontSize: 9,
+                                                        fontWeight: FontWeight.bold,
+                                                        letterSpacing: 0.8,
+                                                      ),
+                                                    ),
+                                                    Text(
+                                                      _formatSpeed(_downloadSpeedBps),
+                                                      style: const TextStyle(
+                                                        color: Color(0xFFFFB800),
+                                                        fontSize: 11,
+                                                        fontWeight: FontWeight.w900,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF090D16),
+                                              borderRadius: BorderRadius.circular(10),
+                                              border: Border.all(color: const Color(0xFF1E293B)),
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                const Icon(Icons.timer_outlined, color: Color(0xFF00FFCC), size: 16),
+                                                const SizedBox(width: 6),
+                                                Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    const Text(
+                                                      'ESTIMATED TIME',
+                                                      style: TextStyle(
+                                                        color: Color(0xFF64748B),
+                                                        fontSize: 9,
+                                                        fontWeight: FontWeight.bold,
+                                                        letterSpacing: 0.8,
+                                                      ),
+                                                    ),
+                                                    Text(
+                                                      _formatEta(_etaSeconds),
+                                                      style: const TextStyle(
+                                                        color: Color(0xFF00FFCC),
+                                                        fontSize: 11,
+                                                        fontWeight: FontWeight.w900,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
                               )
                             : CyberButton(
                                 text: 'AUTHENTICATE & DEPLOY',

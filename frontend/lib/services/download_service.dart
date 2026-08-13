@@ -28,6 +28,13 @@ class DownloadService {
     required String backendUrl,
     required String targetPath,
     required Function(double progress) onProgress,
+    void Function({
+      required double progress,
+      required int receivedBytes,
+      required int totalBytes,
+      required double speedBps,
+      required int etaSeconds,
+    })? onProgressDetail,
     required Function(String log) onLog,
   }) async {
     try {
@@ -46,6 +53,8 @@ class DownloadService {
       onLog('Created temporary download file at: $tempFilePath');
       onLog('Connecting to backend ($cleanUrl)...');
 
+      final int startTime = DateTime.now().millisecondsSinceEpoch;
+
       final Response response = await _dio.download(
         downloadEndpoint,
         tempFilePath,
@@ -53,12 +62,23 @@ class DownloadService {
           validateStatus: (status) => status != null && status < 500,
         ),
         onReceiveProgress: (received, total) {
-          if (total > 0) {
-            final double progress = received / total;
-            onProgress(progress);
-          } else {
-            onProgress(0.0);
+          final now = DateTime.now().millisecondsSinceEpoch;
+          final elapsedSec = (now - startTime) / 1000.0;
+          final speedBps = elapsedSec > 0 ? (received / elapsedSec) : 0.0;
+          final remainingBytes = (total > 0 && total >= received) ? (total - received) : 0;
+          final etaSeconds = speedBps > 0 ? (remainingBytes / speedBps).ceil() : 0;
+          final double progress = (total > 0) ? (received / total) : 0.0;
+
+          if (onProgressDetail != null) {
+            onProgressDetail(
+              progress: progress,
+              receivedBytes: received,
+              totalBytes: total,
+              speedBps: speedBps,
+              etaSeconds: etaSeconds,
+            );
           }
+          onProgress(progress);
         },
       );
 
